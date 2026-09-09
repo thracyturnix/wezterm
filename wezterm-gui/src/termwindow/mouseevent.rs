@@ -43,13 +43,15 @@ impl super::TermWindow {
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
-            | UIItemType::Split(_) => {}
+            | UIItemType::Split(_)
+            | UIItemType::ContextMenuItem(_) => {}
         }
     }
 
     fn enter_ui_item(&mut self, item: &UIItem) {
         match item.item_type {
             UIItemType::TabBar(_) => {}
+            UIItemType::ContextMenuItem(idx) => self.hover_context_menu_item(idx),
             UIItemType::CloseTab(_)
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
@@ -221,6 +223,18 @@ impl super::TermWindow {
                 self.current_mouse_capture = Some(MouseCapture::UI);
             }
             self.mouse_event_ui_item(item, pane, y, event, context);
+        } else if self.context_menu_is_open() {
+            match event.kind {
+                WMEK::Press(MousePress::Right) if self.config.enable_right_click_menu => {
+                    if let Some(pane) = self.get_active_pane_no_overlay() {
+                        self.show_context_menu(event.coords.x, event.coords.y, pane.pane_id());
+                    }
+                }
+                WMEK::Press(_) => self.cancel_modal(),
+                _ => {}
+            }
+            context.invalidate();
+            return;
         } else if matches!(
             self.current_mouse_capture,
             None | Some(MouseCapture::TerminalPane(_))
@@ -381,6 +395,15 @@ impl super::TermWindow {
             }
             UIItemType::CloseTab(idx) => {
                 self.mouse_event_close_tab(idx, event, context);
+            }
+            UIItemType::ContextMenuItem(idx) => {
+                match event.kind {
+                    WMEK::Move => self.hover_context_menu_item(idx),
+                    WMEK::Press(MousePress::Left) => self.activate_context_menu_item(idx),
+                    _ => {}
+                }
+                context.set_cursor(Some(CursorIcon::Default));
+                context.invalidate();
             }
         }
     }
@@ -784,6 +807,17 @@ impl super::TermWindow {
                 },
                 stable_row,
             ));
+
+        if self.config.enable_right_click_menu
+            && matches!(&event.kind, WMEK::Press(MousePress::Right))
+        {
+            let pane_id = self
+                .get_active_pane_no_overlay()
+                .map(|pane| pane.pane_id())
+                .unwrap_or_else(|| pane.pane_id());
+            self.show_context_menu(event.coords.x, event.coords.y, pane_id);
+            return;
+        }
 
         pane.apply_hyperlinks(stable_row..stable_row + 1, &self.config.hyperlink_rules);
 

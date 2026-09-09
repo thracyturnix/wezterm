@@ -168,7 +168,40 @@ pub fn build_default_schemes() -> HashMap<String, Palette> {
             color_schemes.insert(alias, scheme.colors.clone());
         }
     }
+    color_schemes.insert(
+        TERMINATOR_GRUVBOX_SOLARIZED.to_string(),
+        terminator_gruvbox_solarized_palette(),
+    );
     color_schemes
+}
+
+#[cfg(test)]
+mod appearance_preset_tests {
+    use super::*;
+
+    #[test]
+    fn terminator_gruvbox_solarized_is_a_complete_preset() {
+        let mut config = Config::default();
+        config.color_scheme = Some(TERMINATOR_GRUVBOX_SOLARIZED.to_string());
+        let config = config.compute_extra_defaults(None);
+
+        assert_eq!(
+            config.resolved_palette.background,
+            Some((0x28, 0x28, 0x28).into())
+        );
+        assert_eq!(
+            config.resolved_palette.foreground,
+            Some((0xeb, 0xdb, 0xb2).into())
+        );
+        assert_eq!(
+            config.right_click_menu_colors.background,
+            (0x2e, 0x2e, 0x33).into()
+        );
+        assert_eq!(
+            config.window_frame.active_titlebar_bg,
+            (0x2e, 0x2e, 0x33).into()
+        );
+    }
 }
 
 struct LuaPipe {

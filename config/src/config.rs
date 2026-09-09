@@ -1,7 +1,8 @@
 use crate::background::{BackgroundLayer, Gradient};
 use crate::bell::{AudibleBell, EasingFunction, VisualBell};
 use crate::color::{
-    ColorSchemeFile, HsbTransform, Palette, SrgbaTuple, TabBarStyle, WindowFrameConfig,
+    ColorSchemeFile, HsbTransform, Palette, RightClickMenuColors, SrgbaTuple, TabBarStyle,
+    WindowFrameConfig, TERMINATOR_GRUVBOX_SOLARIZED,
 };
 use crate::daemon::DaemonOptions;
 use crate::exec_domain::ExecDomain;
@@ -454,6 +455,18 @@ pub struct Config {
     pub mouse_bindings: Vec<Mouse>,
     #[dynamic(default)]
     pub disable_default_mouse_bindings: bool,
+
+    /// Show the compact action menu when the terminal pane is right-clicked.
+    #[dynamic(default = "default_true")]
+    pub enable_right_click_menu: bool,
+
+    /// Font size used by the right-click menu.
+    #[dynamic(default = "default_right_click_menu_font_size")]
+    pub right_click_menu_font_size: f64,
+
+    /// Colors used by the compact right-click menu.
+    #[dynamic(default)]
+    pub right_click_menu_colors: RightClickMenuColors,
 
     #[dynamic(default)]
     pub daemon_options: DaemonOptions,
@@ -1419,11 +1432,41 @@ impl Config {
             cfg.resolved_palette = cfg.resolved_palette.overlay_with(colors);
         }
 
+        if cfg.color_scheme.as_deref() == Some(TERMINATOR_GRUVBOX_SOLARIZED) {
+            cfg.apply_terminator_gruvbox_solarized_ui();
+        }
+
         if let Some(bg) = BackgroundLayer::with_legacy(self) {
             cfg.background.insert(0, bg);
         }
 
         cfg
+    }
+
+    fn apply_terminator_gruvbox_solarized_ui(&mut self) {
+        let ui_bg = (0x2e, 0x2e, 0x33).into();
+        let ui_fg = (0xda, 0xda, 0xda).into();
+        let ui_hover = (0x46, 0x46, 0x4e).into();
+        let ui_border = (0x20, 0x20, 0x23).into();
+
+        self.command_palette_bg_color = ui_bg;
+        self.command_palette_fg_color = ui_fg;
+        self.char_select_bg_color = ui_bg;
+        self.char_select_fg_color = ui_fg;
+        self.pane_select_bg_color = ui_bg;
+        self.pane_select_fg_color = ui_fg;
+        self.right_click_menu_colors = RightClickMenuColors::default();
+
+        self.window_frame.active_titlebar_bg = ui_bg;
+        self.window_frame.inactive_titlebar_bg = ui_bg;
+        self.window_frame.active_titlebar_fg = ui_fg;
+        self.window_frame.inactive_titlebar_fg = ui_fg;
+        self.window_frame.active_titlebar_border_bottom = ui_border;
+        self.window_frame.inactive_titlebar_border_bottom = ui_border;
+        self.window_frame.button_bg = ui_bg;
+        self.window_frame.button_fg = ui_fg;
+        self.window_frame.button_hover_bg = ui_hover;
+        self.window_frame.button_hover_fg = ui_fg;
     }
 
     fn compute_color_scheme_dirs(&self) -> Vec<PathBuf> {
@@ -1658,6 +1701,10 @@ fn default_char_select_bg_color() -> RgbaColor {
 
 fn default_command_palette_font_size() -> f64 {
     14.0
+}
+
+fn default_right_click_menu_font_size() -> f64 {
+    10.0
 }
 
 fn default_command_palette_fg_color() -> RgbaColor {

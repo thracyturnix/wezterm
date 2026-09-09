@@ -623,6 +623,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: Some("md_content_paste"),
         },
+        SelectAll => CommandDef {
+            brief: "Select All".into(),
+            doc: "Select all visible and scrollback text".into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Edit"],
+            icon: Some("md_select_all"),
+        },
         CopyTextTo {
             text: _,
             destination: ClipboardCopyDestination::PrimarySelection,

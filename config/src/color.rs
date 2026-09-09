@@ -179,6 +179,84 @@ pub struct Palette {
 }
 impl_lua_conversion_dynamic!(Palette);
 
+pub const TERMINATOR_GRUVBOX_SOLARIZED: &str = "Terminator Gruvbox + Solarized";
+
+pub fn terminator_gruvbox_solarized_palette() -> Palette {
+    let tab = |bg, fg| TabBarColor {
+        bg_color: bg,
+        fg_color: fg,
+        ..TabBarColor::default()
+    };
+
+    Palette {
+        foreground: Some((0xeb, 0xdb, 0xb2).into()),
+        background: Some((0x28, 0x28, 0x28).into()),
+        cursor_fg: Some((0x28, 0x28, 0x28).into()),
+        cursor_bg: Some((0xeb, 0xdb, 0xb2).into()),
+        cursor_border: Some((0xeb, 0xdb, 0xb2).into()),
+        selection_fg: Some((0xeb, 0xdb, 0xb2).into()),
+        selection_bg: Some((0x66, 0x5c, 0x54).into()),
+        ansi: Some([
+            (0x07, 0x36, 0x42).into(),
+            (0xdc, 0x32, 0x2f).into(),
+            (0x85, 0x99, 0x00).into(),
+            (0xb5, 0x89, 0x00).into(),
+            (0x26, 0x8b, 0xd2).into(),
+            (0xd3, 0x36, 0x82).into(),
+            (0x2a, 0xa1, 0x98).into(),
+            (0xee, 0xe8, 0xd5).into(),
+        ]),
+        brights: Some([
+            (0x00, 0x2b, 0x36).into(),
+            (0xcb, 0x4b, 0x16).into(),
+            (0x58, 0x6e, 0x75).into(),
+            (0x65, 0x7b, 0x83).into(),
+            (0x83, 0x94, 0x96).into(),
+            (0x6c, 0x71, 0xc4).into(),
+            (0x93, 0xa1, 0xa1).into(),
+            (0xfd, 0xf6, 0xe3).into(),
+        ]),
+        tab_bar: Some(TabBarColors {
+            background: Some((0x2e, 0x2e, 0x33).into()),
+            active_tab: Some(tab((0x28, 0x28, 0x28).into(), (0xeb, 0xdb, 0xb2).into())),
+            inactive_tab: Some(tab((0x2e, 0x2e, 0x33).into(), (0xda, 0xda, 0xda).into())),
+            inactive_tab_hover: Some(tab((0x46, 0x46, 0x4e).into(), (0xda, 0xda, 0xda).into())),
+            new_tab: Some(tab((0x2e, 0x2e, 0x33).into(), (0xda, 0xda, 0xda).into())),
+            new_tab_hover: Some(tab((0x46, 0x46, 0x4e).into(), (0xda, 0xda, 0xda).into())),
+            inactive_tab_edge: Some((0x20, 0x20, 0x23).into()),
+            inactive_tab_edge_hover: Some((0x46, 0x46, 0x4e).into()),
+        }),
+        scrollbar_thumb: Some((0x66, 0x5c, 0x54).into()),
+        split: Some((0x50, 0x49, 0x45).into()),
+        ..Palette::default()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+pub struct RightClickMenuColors {
+    pub background: RgbaColor,
+    pub border: RgbaColor,
+    pub button_background: RgbaColor,
+    pub foreground: RgbaColor,
+    pub disabled_foreground: RgbaColor,
+    pub hover_background: RgbaColor,
+    pub focus_border: RgbaColor,
+}
+
+impl Default for RightClickMenuColors {
+    fn default() -> Self {
+        Self {
+            background: (0x2e, 0x2e, 0x33).into(),
+            border: (0x14, 0x14, 0x16).into(),
+            button_background: (0x2e, 0x2e, 0x33).into(),
+            foreground: (0xda, 0xda, 0xda).into(),
+            disabled_foreground: (0x87, 0x87, 0x8a).into(),
+            hover_background: (0x46, 0x46, 0x4e).into(),
+            focus_border: (0x52, 0x52, 0x57).into(),
+        }
+    }
+}
+
 impl Palette {
     pub fn overlay_with(&self, other: &Self) -> Self {
         macro_rules! overlay {

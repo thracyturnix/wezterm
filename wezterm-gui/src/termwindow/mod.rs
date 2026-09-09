@@ -73,6 +73,7 @@ pub mod background;
 pub mod box_model;
 pub mod charselect;
 pub mod clipboard;
+pub mod contextmenu;
 pub mod keyevent;
 pub mod modal;
 mod mouseevent;
@@ -160,6 +161,7 @@ pub enum UIItemType {
     ScrollThumb,
     BelowScrollThumb,
     Split(PositionedSplit),
+    ContextMenuItem(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2710,6 +2712,9 @@ impl TermWindow {
             CopyTo(dest) => {
                 let text = self.selection_text(pane);
                 self.copy_to_clipboard(*dest, text);
+            }
+            SelectAll => {
+                self.select_all(pane);
             }
             CopyTextTo { text, destination } => {
                 self.copy_to_clipboard(*destination, text.clone());

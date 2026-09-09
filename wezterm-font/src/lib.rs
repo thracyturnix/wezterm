@@ -456,6 +456,7 @@ impl FallbackResolveInfo {
 enum Entity {
     Title,
     CommandPalette,
+    ContextMenu,
     CharSelect,
     PaneSelect,
 }
@@ -473,6 +474,7 @@ struct FontConfigInner {
     pane_select_font: RefCell<Option<Rc<LoadedFont>>>,
     char_select_font: RefCell<Option<Rc<LoadedFont>>>,
     command_palette_font: RefCell<Option<Rc<LoadedFont>>>,
+    context_menu_font: RefCell<Option<Rc<LoadedFont>>>,
     fallback_channel: RefCell<Option<Sender<FallbackResolveInfo>>>,
 }
 
@@ -494,6 +496,7 @@ impl FontConfigInner {
             pane_select_font: RefCell::new(None),
             char_select_font: RefCell::new(None),
             command_palette_font: RefCell::new(None),
+            context_menu_font: RefCell::new(None),
             font_scale: RefCell::new(1.0),
             dpi: RefCell::new(dpi),
             config: RefCell::new(config.clone()),
@@ -512,6 +515,7 @@ impl FontConfigInner {
         self.pane_select_font.borrow_mut().take();
         self.char_select_font.borrow_mut().take();
         self.command_palette_font.borrow_mut().take();
+        self.context_menu_font.borrow_mut().take();
         self.metrics.borrow_mut().take();
         *self.font_dirs.borrow_mut() = Arc::new(FontDatabase::with_font_dirs(config)?);
         Ok(())
@@ -598,7 +602,7 @@ impl FontConfigInner {
         entity: Entity,
     ) -> anyhow::Result<Rc<LoadedFont>> {
         let config = self.config.borrow();
-        let make_bold = entity != Entity::CommandPalette;
+        let make_bold = !matches!(entity, Entity::CommandPalette | Entity::ContextMenu);
         let (sys_font, sys_size) = self.compute_title_font(&config, make_bold);
 
         let (font_size, text_style) = match entity {
@@ -607,6 +611,7 @@ impl FontConfigInner {
                 config.command_palette_font_size,
                 config.command_palette_font.as_ref(),
             ),
+            Entity::ContextMenu => (config.right_click_menu_font_size, None),
             Entity::CharSelect => (
                 config.char_select_font_size,
                 config.char_select_font.as_ref(),
@@ -617,8 +622,20 @@ impl FontConfigInner {
             ),
         };
 
-        let text_style =
-            text_style.unwrap_or(config.window_frame.font.as_ref().unwrap_or(&sys_font));
+        let mut context_menu_style = TextStyle {
+            foreground: None,
+            font: vec![FontAttributes::new("Ubuntu")],
+        };
+        for fallback in &config.font.font {
+            let mut fallback = fallback.clone();
+            fallback.is_fallback = true;
+            context_menu_style.font.push(fallback);
+        }
+        let text_style = if entity == Entity::ContextMenu {
+            &context_menu_style
+        } else {
+            text_style.unwrap_or(config.window_frame.font.as_ref().unwrap_or(&sys_font))
+        };
 
         let dpi = *self.dpi.borrow() as u32;
         let pixel_size = (font_size * dpi as f64 / 72.0) as u16;
@@ -677,6 +694,20 @@ impl FontConfigInner {
         let loaded = self.make_entity_font_impl(myself, Entity::CommandPalette)?;
 
         command_palette_font.replace(Rc::clone(&loaded));
+
+        Ok(loaded)
+    }
+
+    fn context_menu_font(&self, myself: &Rc<Self>) -> anyhow::Result<Rc<LoadedFont>> {
+        let mut context_menu_font = self.context_menu_font.borrow_mut();
+
+        if let Some(entry) = context_menu_font.as_ref() {
+            return Ok(Rc::clone(entry));
+        }
+
+        let loaded = self.make_entity_font_impl(myself, Entity::ContextMenu)?;
+
+        context_menu_font.replace(Rc::clone(&loaded));
 
         Ok(loaded)
     }
@@ -1069,6 +1100,10 @@ impl FontConfiguration {
 
     pub fn command_palette_font(&self) -> anyhow::Result<Rc<LoadedFont>> {
         self.inner.command_palette_font(&self.inner)
+    }
+
+    pub fn context_menu_font(&self) -> anyhow::Result<Rc<LoadedFont>> {
+        self.inner.context_menu_font(&self.inner)
     }
 
     pub fn pane_select_font(&self) -> anyhow::Result<Rc<LoadedFont>> {

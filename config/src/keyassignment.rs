@@ -542,6 +542,7 @@ pub enum KeyAssignment {
     ToggleAlwaysOnBottom,
     SetWindowLevel(WindowLevel),
     CopyTo(ClipboardCopyDestination),
+    SelectAll,
     CopyTextTo {
         text: String,
         destination: ClipboardCopyDestination,
