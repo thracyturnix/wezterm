@@ -13,15 +13,18 @@ convert $conv_opts -resize "!128x128" "$src" ../icon/terminal.png
 
 for dim in 16 32 128 256 512 1024 ; do
   # convert is the imagemagick convert utility
-  convert $conv_opts -border '10%' -bordercolor 'rgba(0,0,0,0)' -resize "!${dim}x${dim}" "$src" "icon_${dim}px.png"
+  convert $conv_opts -resize "!${dim}x${dim}" "$src" "icon_${dim}px.png"
 done
 # png2icns is part of the libicns-utils on Fedora systems.
 # It glues together the various png files into a macOS .icns file
-png2icns ../macos/WezTerm.app/Contents/Resources/terminal.icns icon_*px.png
+if command -v png2icns >/dev/null 2>&1; then
+  png2icns ../macos/WezTerm.app/Contents/Resources/terminal.icns icon_*px.png
+else
+  python3 -c 'from PIL import Image; Image.open("icon_1024px.png").save("../macos/WezTerm.app/Contents/Resources/terminal.icns", sizes=[(16, 16), (32, 32), (128, 128), (256, 256), (512, 512), (1024, 1024)])'
+fi
 
 # Clean up
 rm -f icon_*px.png
 
 # The Windows icon
 convert $conv_opts -define icon:auto-resize=256,128,96,64,48,32,16 $src ../windows/terminal.ico
-
