@@ -1,0 +1,122 @@
+name: Publish APT repository
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+      - ".cargo/config.toml"
+      - ".github/workflows/publish-apt.yml"
+      - "assets/**"
+      - "ci/deploy.sh"
+      - "ci/tag-name.sh"
+      - "get-deps"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'thracyturnix/wezterm'
+    runs-on: ubuntu-latest
+    container: debian:12
+    env:
+      CARGO_INCREMENTAL: "0"
+
+    steps:
+      - name: Install bootstrap tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y curl git openssh-server
+      - name: Allow the checked-out repository
+        run: git config --global --add safe.directory /__w/wezterm/wezterm
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        id: cache-cargo-vendor
+        with:
+          path: |
+            vendor
+            .cargo/config
+          key: apt-cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+      - name: Vendor dependencies
+        if: steps.cache-cargo-vendor.outputs.cache-hit != 'true'
+        run: cargo vendor --locked --versioned-dirs >> .cargo/config
+      - name: Install build dependencies
+        run: env CI=yes PATH=$PATH ./get-deps
+      - name: Build release binaries
+        run: cargo build --release -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes
+      - name: Build Debian package
+        run: bash ci/deploy.sh
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v7
+        with:
+          name: wezterm-apt-package
+          path: wezterm-*.deb
+
+  publish:
+    if: github.repository == 'thracyturnix/wezterm'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      APT_SIGNING_PRIVATE_KEY: ${{ secrets.APT_SIGNING_PRIVATE_KEY }}
+
+    steps:
+      - name: Install repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils dpkg-dev
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Download Debian package
+        uses: actions/download-artifact@v8
+        with:
+          name: wezterm-apt-package
+          path: packages
+      - name: Build and sign repository
+        run: |
+          test -n "$APT_SIGNING_PRIVATE_KEY"
+          printf '%s' "$APT_SIGNING_PRIVATE_KEY" | gpg --batch --import
+          mkdir -p repository/pool/main repository/dists/stable/main/binary-amd64
+          cp packages/*.deb repository/pool/main/
+          cd repository
+          dpkg-scanpackages pool /dev/null > dists/stable/main/binary-amd64/Packages
+          gzip -9 -k dists/stable/main/binary-amd64/Packages
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin='thracyturnix' \
+            -o APT::FTPArchive::Release::Label='thracyturnix WezTerm' \
+            -o APT::FTPArchive::Release::Suite='stable' \
+            -o APT::FTPArchive::Release::Codename='stable' \
+            -o APT::FTPArchive::Release::Architectures='amd64' \
+            -o APT::FTPArchive::Release::Components='main' \
+            release dists/stable > dists/stable/Release
+          gpg --batch --yes --local-user EB3EFDD8C82A6B21683E1260B40F0A13C3C75863 \
+            --output dists/stable/Release.gpg --detach-sign dists/stable/Release
+          gpg --batch --yes --local-user EB3EFDD8C82A6B21683E1260B40F0A13C3C75863 \
+            --output dists/stable/InRelease --clearsign dists/stable/Release
+          cp ../assets/apt/thracyturnix-wezterm-archive-keyring.gpg .
+      - name: Upload APT repository
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repository
+      - name: Deploy APT repository
+        id: deployment
+        uses: actions/deploy-pages@v4

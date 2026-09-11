@@ -62,9 +62,9 @@ impl crate::TermWindow {
         let items = self.tab_bar.items();
         let colors = self
             .config
-            .colors
+            .resolved_palette
+            .tab_bar
             .as_ref()
-            .and_then(|c| c.tab_bar.as_ref())
             .cloned()
             .unwrap_or_else(TabBarColors::default);
 

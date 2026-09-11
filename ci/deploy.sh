@@ -355,6 +355,8 @@ EOF
         install -Dm644 assets/shell-completion/bash pkg/debian/usr/share/bash-completion/completions/wezterm
         install -Dm644 assets/shell-completion/zsh pkg/debian/usr/share/zsh/functions/Completion/Unix/_wezterm
         install -Dm644 assets/shell-integration/* -t pkg/debian/etc/profile.d
+        install -Dm644 assets/apt/thracyturnix-wezterm-archive-keyring.gpg pkg/debian/usr/share/keyrings/thracyturnix-wezterm-archive-keyring.gpg
+        install -Dm644 assets/apt/thracyturnix-wezterm.list pkg/debian/etc/apt/sources.list.d/thracyturnix-wezterm.list
 
         if [[ "$BUILD_REASON" == "Schedule" ]] ; then
           debname=wezterm-nightly.$distro$distver

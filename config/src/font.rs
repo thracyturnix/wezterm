@@ -201,9 +201,9 @@ impl Default for FontWeight {
 }
 
 impl FontWeight {
-    /// The amount by which to shift the weight when synthesizing dim font variant.
-    /// See issue #8049 for examples.
-    const WEIGHT_STEP_LIGHTER: u16 = 300;
+    /// Keep dim text visibly lighter without reducing the bundled regular font
+    /// all the way to its hard-to-read thin face.
+    const WEIGHT_STEP_LIGHTER: u16 = 100;
     /// The amount by which to shift the weight when synthesizing bold font variant.
     /// For 'bolder' we use a bigger step because 'regular vs bold' is usually less
     /// obvious than 'regular vs light' (above) at the same step differences.
@@ -715,6 +715,11 @@ pub enum FontShaperSelection {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn dim_regular_text_uses_a_readable_light_weight() {
+        assert_eq!(FontWeight::REGULAR.lighter(), FontWeight::LIGHT);
+    }
 
     #[test]
     fn test_reduce() {

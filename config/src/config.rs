@@ -197,6 +197,7 @@ pub struct Config {
 
     /// Use a named color scheme rather than the palette specified
     /// by the colors setting.
+    #[dynamic(default = "default_color_scheme")]
     pub color_scheme: Option<String>,
 
     /// Named color schemes
@@ -1715,6 +1716,10 @@ fn default_command_palette_bg_color() -> RgbaColor {
     (0x33, 0x33, 0x33).into()
 }
 
+fn default_color_scheme() -> Option<String> {
+    Some(TERMINATOR_GRUVBOX_SOLARIZED.to_string())
+}
+
 fn default_swallow_mouse_click_on_window_focus() -> bool {
     cfg!(target_os = "macos")
 }
@@ -1750,7 +1755,7 @@ fn default_swap_backspace_and_delete() -> bool {
 }
 
 fn default_scrollback_lines() -> usize {
-    3500
+    50_000
 }
 
 const MAX_SCROLLBACK_LINES: usize = 999_999_999;
@@ -1848,7 +1853,7 @@ fn default_bypass_mouse_reporting_modifiers() -> Modifiers {
 }
 
 fn default_gui_startup_args() -> Vec<String> {
-    vec!["start".to_string()]
+    vec!["connect".to_string(), "unix".to_string()]
 }
 
 // Coupled with term/src/config.rs:TerminalConfiguration::unicode_version
@@ -2053,8 +2058,8 @@ pub enum NewlineCanon {
 
 #[derive(FromDynamic, ToDynamic, Clone, Copy, Debug, Default)]
 pub enum WindowCloseConfirmation {
-    #[default]
     AlwaysPrompt,
+    #[default]
     NeverPrompt,
     // TODO: something smart where we see whether the
     // running programs are stateful

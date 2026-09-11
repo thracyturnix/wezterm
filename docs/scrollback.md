@@ -19,7 +19,7 @@ you have available.
 
 ```lua
 -- How many lines of scrollback you want to retain per tab
-config.scrollback_lines = 3500
+config.scrollback_lines = 50000
 ```
 
 ### Clearing the scrollback buffer

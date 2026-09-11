@@ -180,9 +180,24 @@ mod appearance_preset_tests {
     use super::*;
 
     #[test]
+    fn long_running_session_defaults() {
+        let config = Config::default();
+
+        assert_eq!(config.scrollback_lines, 50_000);
+        assert_eq!(config.default_gui_startup_args, ["connect", "unix"]);
+        assert!(matches!(
+            config.window_close_confirmation,
+            WindowCloseConfirmation::NeverPrompt
+        ));
+    }
+
+    #[test]
     fn terminator_gruvbox_solarized_is_a_complete_preset() {
-        let mut config = Config::default();
-        config.color_scheme = Some(TERMINATOR_GRUVBOX_SOLARIZED.to_string());
+        let config = Config::default();
+        assert_eq!(
+            config.color_scheme.as_deref(),
+            Some(TERMINATOR_GRUVBOX_SOLARIZED)
+        );
         let config = config.compute_extra_defaults(None);
 
         assert_eq!(
@@ -200,6 +215,16 @@ mod appearance_preset_tests {
         assert_eq!(
             config.window_frame.active_titlebar_bg,
             (0x2e, 0x2e, 0x33).into()
+        );
+        assert_eq!(
+            config
+                .resolved_palette
+                .tab_bar
+                .as_ref()
+                .unwrap()
+                .active_tab()
+                .bg_color,
+            (0x28, 0x28, 0x28).into()
         );
     }
 }

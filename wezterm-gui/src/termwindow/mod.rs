@@ -3279,6 +3279,18 @@ impl TermWindow {
         };
         let tab_id = tab.tab_id();
         let mux_window_id = self.mux_window_id;
+        let closing_last_tab_without_window_confirmation = matches!(
+            self.config.window_close_confirmation,
+            WindowCloseConfirmation::NeverPrompt
+        ) && mux
+            .get_window(mux_window_id)
+            .map_or(false, |window| window.count_tabs() == 1);
+        if closing_last_tab_without_window_confirmation {
+            if let Some(window) = self.window.clone() {
+                self.close_requested(&window);
+            }
+            return;
+        }
         if confirm && !tab.can_close_without_prompting(CloseReason::Tab) {
             let window = self.window.clone().unwrap();
             let (overlay, future) = start_overlay(self, &tab, move |tab_id, term| {

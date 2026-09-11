@@ -18,7 +18,10 @@ config.window_close_confirmation = 'AlwaysPrompt'
 See also
 [skip_close_confirmation_for_processes_named](../config/skip_close_confirmation_for_processes_named.md).
 
-Note that this `window_close_confirmation` option doesn't apply to the default
-`CTRL-SHIFT-W` or `CMD-w` key assignments; if you want to change prompts for
-those, you will need to override the key shortcut as shown in the
+The default `CTRL-SHIFT-W` and `CMD-w` key assignments also respect
+`"NeverPrompt"` when closing the final tab in a window. Closing a tab while
+other tabs remain still uses the normal tab-close confirmation behavior. When
+the final tab belongs to a multiplexer session, the shortcut closes the window
+without destroying that session. You can override the tab-close behavior as
+shown in the
 [CloseCurrentTab](../keyassignment/CloseCurrentTab.md) documentation.

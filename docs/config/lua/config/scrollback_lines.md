@@ -2,7 +2,7 @@
 tags:
   - scroll_bar
 ---
-# `scrollback_lines = 3500`
+# `scrollback_lines = 50000`
 
 How many lines of scrollback you want to retain.
 
