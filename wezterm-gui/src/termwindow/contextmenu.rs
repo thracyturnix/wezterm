@@ -10,12 +10,13 @@ use crate::utilsprites::RenderMetrics;
 use config::keyassignment::{
     ClipboardCopyDestination, ClipboardPasteSource, KeyAssignment, SpawnCommand,
 };
-use config::{Dimension, DimensionContext};
+use config::{DeferredKeyCode, Dimension, DimensionContext, KeyNoAction};
 use mux::pane::PaneId;
 use mux::Mux;
 use std::cell::{Ref, RefCell};
 use wezterm_term::{KeyCode, KeyModifiers, MouseEvent};
 use window::color::LinearRgba;
+use window::{KeyCode as WindowKeyCode, Modifiers as WindowModifiers};
 
 struct MenuItem {
     label: &'static str,
@@ -135,6 +136,14 @@ impl ContextMenu {
                     enabled: can_copy,
                 },
                 MenuItem {
+                    label: "Cut",
+                    action: KeyAssignment::SendKey(KeyNoAction {
+                        key: DeferredKeyCode::KeyCode(WindowKeyCode::Char('x')),
+                        mods: WindowModifiers::CTRL,
+                    }),
+                    enabled: true,
+                },
+                MenuItem {
                     label: "Paste",
                     action: KeyAssignment::PasteFrom(ClipboardPasteSource::Clipboard),
                     enabled: true,
@@ -142,6 +151,11 @@ impl ContextMenu {
                 MenuItem {
                     label: "Select All",
                     action: KeyAssignment::SelectAll,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Close",
+                    action: KeyAssignment::CloseCurrentPane { confirm: true },
                     enabled: true,
                 },
             ],
@@ -310,7 +324,8 @@ impl ContextMenu {
             }));
 
         let dimensions = term_window.dimensions;
-        let estimated_height = metrics.cell_size.height as f32 * 4. + 58.;
+        let estimated_height =
+            metrics.cell_size.height as f32 * self.items.len().saturating_sub(1) as f32 + 58.;
         let x = self
             .origin_x
             .min((dimensions.pixel_width as f32 - menu_width - 12.).max(8.));
