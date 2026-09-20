@@ -1098,7 +1098,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 .into(),
             keys: vec![],
             args: &[ArgType::ActivePane],
-            menubar: &["Shell"],
+            menubar: &[],
             icon: Some("md_close_box_outline"),
         },
         CloseCurrentPane { confirm: false } => CommandDef {
@@ -1108,7 +1108,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 .into(),
             keys: vec![],
             args: &[ArgType::ActivePane],
-            menubar: &[],
+            menubar: &["Shell"],
             icon: Some("md_close_box_outline"),
         },
         ActivateWindow(n) => {
@@ -2045,7 +2045,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
             ..Default::default()
         }),
         CloseCurrentTab { confirm: true },
-        CloseCurrentPane { confirm: true },
+        CloseCurrentPane { confirm: false },
         DetachDomain(SpawnTabDomain::CurrentPaneDomain),
         ResetTerminal,
         // ----------------- Edit

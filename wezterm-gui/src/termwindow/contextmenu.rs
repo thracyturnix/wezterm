@@ -155,7 +155,7 @@ impl ContextMenu {
                 },
                 MenuItem {
                     label: "Close",
-                    action: KeyAssignment::CloseCurrentPane { confirm: true },
+                    action: KeyAssignment::CloseCurrentPane { confirm: false },
                     enabled: true,
                 },
             ],
