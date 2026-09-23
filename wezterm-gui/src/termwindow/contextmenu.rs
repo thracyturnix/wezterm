@@ -365,7 +365,14 @@ impl ContextMenu {
         let pane = Mux::get().get_pane(self.pane_id);
         term_window.cancel_modal();
         if let Some(pane) = pane {
-            term_window.perform_key_assignment(&pane, &action)?;
+            match action {
+                KeyAssignment::CloseCurrentPane { confirm } => {
+                    term_window.close_pane(&pane, confirm);
+                }
+                _ => {
+                    term_window.perform_key_assignment(&pane, &action)?;
+                }
+            }
         }
         Ok(())
     }

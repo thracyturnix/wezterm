@@ -3216,17 +3216,21 @@ impl TermWindow {
         }
     }
     fn close_current_pane(&mut self, confirm: bool) {
-        let mux_window_id = self.mux_window_id;
         let mux = Mux::get();
-        let tab = match mux.get_active_tab_for_window(mux_window_id) {
+        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
             Some(tab) => tab,
             None => return,
         };
         let pane = match tab.get_active_pane() {
-            Some(p) => p,
+            Some(pane) => pane,
             None => return,
         };
+        self.close_pane(&pane, confirm);
+    }
 
+    pub(super) fn close_pane(&mut self, pane: &Arc<dyn Pane>, confirm: bool) {
+        let mux_window_id = self.mux_window_id;
+        let mux = Mux::get();
         let pane_id = pane.pane_id();
         if confirm && !pane.can_close_without_prompting(CloseReason::Pane) {
             let window = self.window.clone().unwrap();
