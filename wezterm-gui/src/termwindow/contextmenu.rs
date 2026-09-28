@@ -11,9 +11,9 @@ use config::keyassignment::{
     ClipboardCopyDestination, ClipboardPasteSource, KeyAssignment, SpawnCommand,
 };
 use config::{DeferredKeyCode, Dimension, DimensionContext, KeyNoAction};
-use mux::pane::PaneId;
-use mux::Mux;
+use mux::pane::Pane;
 use std::cell::{Ref, RefCell};
+use std::sync::Arc;
 use wezterm_term::{KeyCode, KeyModifiers, MouseEvent};
 use window::color::LinearRgba;
 use window::{KeyCode as WindowKeyCode, Modifiers as WindowModifiers};
@@ -107,18 +107,18 @@ pub struct ContextMenu {
     selected: RefCell<usize>,
     origin_x: f32,
     origin_y: f32,
-    pane_id: PaneId,
+    pane: Arc<dyn Pane>,
     items: Vec<MenuItem>,
 }
 
 impl ContextMenu {
-    pub fn new(origin_x: isize, origin_y: isize, pane_id: PaneId, can_copy: bool) -> Self {
+    pub fn new(origin_x: isize, origin_y: isize, pane: Arc<dyn Pane>, can_copy: bool) -> Self {
         Self {
             element: RefCell::new(None),
             selected: RefCell::new(0),
             origin_x: origin_x.max(0) as f32,
             origin_y: origin_y.max(0) as f32,
-            pane_id,
+            pane,
             items: vec![
                 MenuItem {
                     label: "Split horizontally",
@@ -362,16 +362,13 @@ impl ContextMenu {
             None => return Ok(()),
             Some(_) => return Ok(()),
         };
-        let pane = Mux::get().get_pane(self.pane_id);
         term_window.cancel_modal();
-        if let Some(pane) = pane {
-            match action {
-                KeyAssignment::CloseCurrentPane { confirm } => {
-                    term_window.close_pane(&pane, confirm);
-                }
-                _ => {
-                    term_window.perform_key_assignment(&pane, &action)?;
-                }
+        match action {
+            KeyAssignment::CloseCurrentPane { confirm } => {
+                term_window.close_pane(&self.pane, confirm);
+            }
+            _ => {
+                term_window.perform_key_assignment(&self.pane, &action)?;
             }
         }
         Ok(())
@@ -450,12 +447,9 @@ impl Modal for ContextMenu {
 }
 
 impl TermWindow {
-    pub fn show_context_menu(&mut self, x: isize, y: isize, pane_id: PaneId) {
-        let can_copy = Mux::get()
-            .get_pane(pane_id)
-            .map(|pane| !self.selection_text(&pane).is_empty())
-            .unwrap_or(false);
-        self.set_modal(std::rc::Rc::new(ContextMenu::new(x, y, pane_id, can_copy)));
+    pub fn show_context_menu(&mut self, x: isize, y: isize, pane: Arc<dyn Pane>) {
+        let can_copy = self.selection(pane.pane_id()).range.is_some();
+        self.set_modal(std::rc::Rc::new(ContextMenu::new(x, y, pane, can_copy)));
     }
 
     pub fn context_menu_is_open(&self) -> bool {

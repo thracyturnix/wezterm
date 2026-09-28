@@ -226,8 +226,8 @@ impl super::TermWindow {
         } else if self.context_menu_is_open() {
             match event.kind {
                 WMEK::Press(MousePress::Right) if self.config.enable_right_click_menu => {
-                    if let Some(pane) = self.get_active_pane_no_overlay() {
-                        self.show_context_menu(event.coords.x, event.coords.y, pane.pane_id());
+                    if let Some(pane) = self.get_active_pane_or_overlay() {
+                        self.show_context_menu(event.coords.x, event.coords.y, pane);
                     }
                 }
                 WMEK::Press(_) => self.cancel_modal(),
@@ -811,11 +811,7 @@ impl super::TermWindow {
         if self.config.enable_right_click_menu
             && matches!(&event.kind, WMEK::Press(MousePress::Right))
         {
-            let pane_id = self
-                .get_active_pane_no_overlay()
-                .map(|pane| pane.pane_id())
-                .unwrap_or_else(|| pane.pane_id());
-            self.show_context_menu(event.coords.x, event.coords.y, pane_id);
+            self.show_context_menu(event.coords.x, event.coords.y, pane);
             return;
         }
 
