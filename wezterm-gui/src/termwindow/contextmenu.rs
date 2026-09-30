@@ -12,16 +12,25 @@ use config::keyassignment::{
 };
 use config::{DeferredKeyCode, Dimension, DimensionContext, KeyNoAction};
 use mux::pane::Pane;
-use std::cell::{Ref, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::sync::Arc;
+use wezterm_dynamic::Value;
 use wezterm_term::{KeyCode, KeyModifiers, MouseEvent};
 use window::color::LinearRgba;
 use window::{KeyCode as WindowKeyCode, Modifiers as WindowModifiers};
 
 struct MenuItem {
     label: &'static str,
-    action: KeyAssignment,
+    action: MenuAction,
     enabled: bool,
+}
+
+#[derive(Clone)]
+enum MenuAction {
+    Key(KeyAssignment),
+    Themes,
+    Back,
+    ColorScheme(&'static str),
 }
 
 const ADD_RIGHT_ICON: &[Poly] = &[
@@ -105,10 +114,12 @@ const ADD_DOWN_ICON: &[Poly] = &[
 pub struct ContextMenu {
     element: RefCell<Option<Vec<ComputedElement>>>,
     selected: RefCell<usize>,
+    in_themes: Cell<bool>,
     origin_x: f32,
     origin_y: f32,
     pane: Arc<dyn Pane>,
-    items: Vec<MenuItem>,
+    main_items: Vec<MenuItem>,
+    theme_items: Vec<MenuItem>,
 }
 
 impl ContextMenu {
@@ -116,50 +127,114 @@ impl ContextMenu {
         Self {
             element: RefCell::new(None),
             selected: RefCell::new(0),
+            in_themes: Cell::new(false),
             origin_x: origin_x.max(0) as f32,
             origin_y: origin_y.max(0) as f32,
             pane,
-            items: vec![
+            main_items: vec![
                 MenuItem {
                     label: "Split horizontally",
-                    action: KeyAssignment::SplitHorizontal(SpawnCommand::default()),
+                    action: MenuAction::Key(
+                        KeyAssignment::SplitHorizontal(SpawnCommand::default()),
+                    ),
                     enabled: true,
                 },
                 MenuItem {
                     label: "Split vertically",
-                    action: KeyAssignment::SplitVertical(SpawnCommand::default()),
+                    action: MenuAction::Key(KeyAssignment::SplitVertical(SpawnCommand::default())),
                     enabled: true,
                 },
                 MenuItem {
                     label: "Copy",
-                    action: KeyAssignment::CopyTo(ClipboardCopyDestination::Clipboard),
+                    action: MenuAction::Key(KeyAssignment::CopyTo(
+                        ClipboardCopyDestination::Clipboard,
+                    )),
                     enabled: can_copy,
                 },
                 MenuItem {
                     label: "Cut",
-                    action: KeyAssignment::SendKey(KeyNoAction {
+                    action: MenuAction::Key(KeyAssignment::SendKey(KeyNoAction {
                         key: DeferredKeyCode::KeyCode(WindowKeyCode::Char('x')),
                         mods: WindowModifiers::CTRL,
-                    }),
+                    })),
                     enabled: true,
                 },
                 MenuItem {
                     label: "Paste",
-                    action: KeyAssignment::PasteFrom(ClipboardPasteSource::Clipboard),
+                    action: MenuAction::Key(KeyAssignment::PasteFrom(
+                        ClipboardPasteSource::Clipboard,
+                    )),
                     enabled: true,
                 },
                 MenuItem {
                     label: "Select All",
-                    action: KeyAssignment::SelectAll,
+                    action: MenuAction::Key(KeyAssignment::SelectAll),
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Themes >",
+                    action: MenuAction::Themes,
                     enabled: true,
                 },
                 MenuItem {
                     label: "Close",
-                    action: KeyAssignment::CloseCurrentPane { confirm: false },
+                    action: MenuAction::Key(KeyAssignment::CloseCurrentPane { confirm: false }),
+                    enabled: true,
+                },
+            ],
+            theme_items: vec![
+                MenuItem {
+                    label: "< Back",
+                    action: MenuAction::Back,
+                    enabled: true,
+                },
+                MenuItem {
+                    label: config::TERMINATOR_GRUVBOX_SOLARIZED,
+                    action: MenuAction::ColorScheme(config::TERMINATOR_GRUVBOX_SOLARIZED),
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Gruvbox Dark Soft",
+                    action: MenuAction::ColorScheme("Gruvbox dark, soft (base16)"),
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Everforest Dark Soft",
+                    action: MenuAction::ColorScheme("Everforest Dark Soft (Gogh)"),
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Nord",
+                    action: MenuAction::ColorScheme("Nord (Gogh)"),
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Solarized Dark",
+                    action: MenuAction::ColorScheme("Solarized Dark (Gogh)"),
                     enabled: true,
                 },
             ],
         }
+    }
+
+    fn items(&self) -> &[MenuItem] {
+        if self.in_themes.get() {
+            &self.theme_items
+        } else {
+            &self.main_items
+        }
+    }
+
+    fn show_themes(&self, show: bool, term_window: &mut TermWindow) {
+        self.in_themes.set(show);
+        *self.selected.borrow_mut() = if show { 0 } else { self.main_items.len() - 2 };
+        self.element.borrow_mut().take();
+        term_window.invalidate_modal();
+    }
+
+    fn themes_is_selected(&self) -> bool {
+        let selected = *self.selected.borrow();
+        matches!(&self.items()[selected].action, MenuAction::Themes)
     }
 
     fn compute(&self, term_window: &mut TermWindow) -> anyhow::Result<Vec<ComputedElement>> {
@@ -178,10 +253,12 @@ impl ContextMenu {
         let selected_bg: LinearRgba = colors.hover_background.to_linear();
         let selected_border: LinearRgba = colors.focus_border.to_linear();
         let selected = *self.selected.borrow();
-        let menu_width = 118.;
+        let in_themes = self.in_themes.get();
+        let items = self.items();
+        let menu_width = if in_themes { 235. } else { 118. };
 
         let mut buttons = Vec::with_capacity(2);
-        for (idx, item) in self.items.iter().take(2).enumerate() {
+        for (idx, item) in items.iter().take(if in_themes { 0 } else { 2 }).enumerate() {
             let icon = if idx == 0 {
                 ADD_RIGHT_ICON
             } else {
@@ -244,23 +321,36 @@ impl ContextMenu {
             );
         }
 
-        let mut rows = vec![Element::new(&font, ElementContent::Children(buttons))
-            .margin(BoxDimension {
-                left: Dimension::Pixels(0.),
-                right: Dimension::Pixels(0.),
-                top: Dimension::Pixels(0.),
-                bottom: Dimension::Pixels(15.),
-            })
-            .display(DisplayType::Block)];
+        let mut rows = vec![];
+        if !in_themes {
+            rows.push(
+                Element::new(&font, ElementContent::Children(buttons))
+                    .margin(BoxDimension {
+                        left: Dimension::Pixels(0.),
+                        right: Dimension::Pixels(0.),
+                        top: Dimension::Pixels(0.),
+                        bottom: Dimension::Pixels(15.),
+                    })
+                    .display(DisplayType::Block),
+            );
+        }
 
-        for (idx, item) in self.items.iter().enumerate().skip(2) {
+        for (idx, item) in items.iter().enumerate().skip(if in_themes { 0 } else { 2 }) {
             let bg = if idx == selected {
                 selected_bg.into()
             } else {
                 panel_bg.into()
             };
+            let label = match &item.action {
+                MenuAction::ColorScheme(name)
+                    if term_window.config.color_scheme.as_deref() == Some(name) =>
+                {
+                    format!("* {}", item.label)
+                }
+                _ => item.label.to_string(),
+            };
             rows.push(
-                Element::new(&font, ElementContent::Text(item.label.to_string()))
+                Element::new(&font, ElementContent::Text(label))
                     .item_type(UIItemType::ContextMenuItem(idx))
                     .colors(ElementColors {
                         border: BorderColor::default(),
@@ -324,8 +414,9 @@ impl ContextMenu {
             }));
 
         let dimensions = term_window.dimensions;
-        let estimated_height =
-            metrics.cell_size.height as f32 * self.items.len().saturating_sub(1) as f32 + 58.;
+        let estimated_height = metrics.cell_size.height as f32
+            * items.len().saturating_sub(if in_themes { 0 } else { 1 }) as f32
+            + 58.;
         let x = self
             .origin_x
             .min((dimensions.pixel_width as f32 - menu_width - 12.).max(8.));
@@ -357,18 +448,37 @@ impl ContextMenu {
     }
 
     fn activate(&self, idx: usize, term_window: &mut TermWindow) -> anyhow::Result<()> {
-        let action = match self.items.get(idx) {
+        let action = match self.items().get(idx) {
             Some(item) if item.enabled => item.action.clone(),
             None => return Ok(()),
             Some(_) => return Ok(()),
         };
-        term_window.cancel_modal();
         match action {
-            KeyAssignment::CloseCurrentPane { confirm } => {
-                term_window.close_pane(&self.pane, confirm);
+            MenuAction::Themes => self.show_themes(true, term_window),
+            MenuAction::Back => self.show_themes(false, term_window),
+            MenuAction::ColorScheme(name) => {
+                let mut overrides = match &term_window.config_overrides {
+                    Value::Object(object) => object.clone(),
+                    _ => Default::default(),
+                };
+                overrides.insert(
+                    Value::String("color_scheme".to_string()),
+                    Value::String(name.to_string()),
+                );
+                term_window.cancel_modal();
+                term_window.config_overrides = Value::Object(overrides);
+                term_window.config_was_reloaded();
             }
-            _ => {
-                term_window.perform_key_assignment(&self.pane, &action)?;
+            MenuAction::Key(action) => {
+                term_window.cancel_modal();
+                match action {
+                    KeyAssignment::CloseCurrentPane { confirm } => {
+                        term_window.close_pane(&self.pane, confirm)
+                    }
+                    _ => {
+                        term_window.perform_key_assignment(&self.pane, &action)?;
+                    }
+                }
             }
         }
         Ok(())
@@ -376,7 +486,7 @@ impl ContextMenu {
 
     fn move_selection(&self, delta: isize, term_window: &mut TermWindow) {
         let mut selected = self.selected.borrow_mut();
-        let last = self.items.len().saturating_sub(1);
+        let last = self.items().len().saturating_sub(1);
         loop {
             let next = if delta < 0 {
                 selected.saturating_sub(delta.unsigned_abs())
@@ -387,7 +497,7 @@ impl ContextMenu {
                 break;
             }
             *selected = next;
-            if self.items[*selected].enabled {
+            if self.items()[*selected].enabled {
                 break;
             }
         }
@@ -396,7 +506,7 @@ impl ContextMenu {
     }
 
     pub fn select_item(&self, idx: usize, term_window: &mut TermWindow) {
-        if idx < self.items.len() && self.items[idx].enabled && *self.selected.borrow() != idx {
+        if idx < self.items().len() && self.items()[idx].enabled && *self.selected.borrow() != idx {
             *self.selected.borrow_mut() = idx;
             self.element.borrow_mut().take();
             term_window.invalidate_modal();
@@ -416,11 +526,18 @@ impl Modal for ContextMenu {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<bool> {
         match (key, mods) {
+            (KeyCode::Escape | KeyCode::LeftArrow, KeyModifiers::NONE) if self.in_themes.get() => {
+                self.show_themes(false, term_window)
+            }
             (KeyCode::Escape, KeyModifiers::NONE) => term_window.cancel_modal(),
             (KeyCode::UpArrow, KeyModifiers::NONE) => self.move_selection(-1, term_window),
             (KeyCode::DownArrow, KeyModifiers::NONE) => self.move_selection(1, term_window),
+            (KeyCode::RightArrow, KeyModifiers::NONE) if self.themes_is_selected() => {
+                self.show_themes(true, term_window)
+            }
             (KeyCode::Enter, KeyModifiers::NONE) => {
-                self.activate(*self.selected.borrow(), term_window)?
+                let selected = *self.selected.borrow();
+                self.activate(selected, term_window)?
             }
             _ => return Ok(false),
         }

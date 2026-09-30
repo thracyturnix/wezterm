@@ -13,3 +13,7 @@ config.color_scheme = 'Terminator Gruvbox + Solarized'
 The setting also colors the tab bar, title bar, command palette, pane and
 character selectors, split lines, scrollbar, selection, cursor, and compact
 right-click menu.
+
+The right-click menu has a **Themes** submenu with this preset and four muted
+built-in alternatives. A choice changes the current window until it closes;
+set `color_scheme` in your configuration to make a choice the startup default.
