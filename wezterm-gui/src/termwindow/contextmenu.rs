@@ -123,7 +123,7 @@ pub struct ContextMenu {
 }
 
 impl ContextMenu {
-    pub fn new(origin_x: isize, origin_y: isize, pane: Arc<dyn Pane>, can_copy: bool) -> Self {
+    pub fn new(origin_x: isize, origin_y: isize, pane: Arc<dyn Pane>) -> Self {
         Self {
             element: RefCell::new(None),
             selected: RefCell::new(0),
@@ -149,7 +149,7 @@ impl ContextMenu {
                     action: MenuAction::Key(KeyAssignment::CopyTo(
                         ClipboardCopyDestination::Clipboard,
                     )),
-                    enabled: can_copy,
+                    enabled: true,
                 },
                 MenuItem {
                     label: "Cut",
@@ -475,6 +475,12 @@ impl ContextMenu {
                     KeyAssignment::CloseCurrentPane { confirm } => {
                         term_window.close_pane(&self.pane, confirm)
                     }
+                    KeyAssignment::CopyTo(destination) => {
+                        let text = term_window.selection_text(&self.pane);
+                        if !text.is_empty() {
+                            term_window.copy_to_clipboard(destination, text);
+                        }
+                    }
                     _ => {
                         term_window.perform_key_assignment(&self.pane, &action)?;
                     }
@@ -565,8 +571,7 @@ impl Modal for ContextMenu {
 
 impl TermWindow {
     pub fn show_context_menu(&mut self, x: isize, y: isize, pane: Arc<dyn Pane>) {
-        let can_copy = self.selection(pane.pane_id()).range.is_some();
-        self.set_modal(std::rc::Rc::new(ContextMenu::new(x, y, pane, can_copy)));
+        self.set_modal(std::rc::Rc::new(ContextMenu::new(x, y, pane)));
     }
 
     pub fn context_menu_is_open(&self) -> bool {
