@@ -131,6 +131,12 @@ case $OSTYPE in
   linux-gnu|linux)
     distro=$(lsb_release -is 2>/dev/null || sh -c "source /etc/os-release && echo \$NAME")
     distver=$(lsb_release -rs 2>/dev/null || sh -c "source /etc/os-release && echo \$VERSION_ID")
+    # LMDE reports Linuxmint 7 through lsb_release, but packages against
+    # Debian 13. Use the Debian base version for the package filename.
+    if [[ "$distro" == Linuxmint && "$ID_LIKE" == *debian* && -n "$DEBIAN_VERSION_FULL" ]]; then
+      distro=Debian
+      distver=${DEBIAN_VERSION_FULL%%.*}
+    fi
     case "$distro" in
       *Fedora*|*CentOS*|*SUSE*)
         WEZTERM_RPM_VERSION=$(echo ${TAG_NAME#nightly-} | tr - _)
@@ -382,6 +388,10 @@ EOF
         tar cJf $debname.tar.xz -C pkg wezterm
         rm -rf pkg
       ;;
+      *)
+        echo "Unsupported Linux distribution for packaging: $distro $distver" >&2
+        exit 1
+      ;;
     esac
     ;;
   linux-musl)
@@ -437,8 +447,14 @@ EOF
         abuild -F checksum
         abuild -Fr
       ;;
+      *)
+        echo "Unsupported musl distribution for packaging: $ID" >&2
+        exit 1
+      ;;
     esac
     ;;
   *)
+    echo "Unsupported platform for packaging: $OSTYPE" >&2
+    exit 1
     ;;
 esac

@@ -22,7 +22,6 @@ use window::{KeyCode as WindowKeyCode, Modifiers as WindowModifiers};
 struct MenuItem {
     label: &'static str,
     action: MenuAction,
-    enabled: bool,
 }
 
 #[derive(Clone)]
@@ -137,19 +136,16 @@ impl ContextMenu {
                     action: MenuAction::Key(
                         KeyAssignment::SplitHorizontal(SpawnCommand::default()),
                     ),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Split vertically",
                     action: MenuAction::Key(KeyAssignment::SplitVertical(SpawnCommand::default())),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Copy",
                     action: MenuAction::Key(KeyAssignment::CopyTo(
                         ClipboardCopyDestination::Clipboard,
                     )),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Cut",
@@ -157,61 +153,50 @@ impl ContextMenu {
                         key: DeferredKeyCode::KeyCode(WindowKeyCode::Char('x')),
                         mods: WindowModifiers::CTRL,
                     })),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Paste",
                     action: MenuAction::Key(KeyAssignment::PasteFrom(
                         ClipboardPasteSource::Clipboard,
                     )),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Select All",
                     action: MenuAction::Key(KeyAssignment::SelectAll),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Themes >",
                     action: MenuAction::Themes,
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Close",
                     action: MenuAction::Key(KeyAssignment::CloseCurrentPane { confirm: false }),
-                    enabled: true,
                 },
             ],
             theme_items: vec![
                 MenuItem {
                     label: "< Back",
                     action: MenuAction::Back,
-                    enabled: true,
                 },
                 MenuItem {
                     label: config::TERMINATOR_GRUVBOX_SOLARIZED,
                     action: MenuAction::ColorScheme(config::TERMINATOR_GRUVBOX_SOLARIZED),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Gruvbox Dark Soft",
                     action: MenuAction::ColorScheme("Gruvbox dark, soft (base16)"),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Everforest Dark Soft",
                     action: MenuAction::ColorScheme("Everforest Dark Soft (Gogh)"),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Nord",
                     action: MenuAction::ColorScheme("Nord (Gogh)"),
-                    enabled: true,
                 },
                 MenuItem {
                     label: "Solarized Dark",
                     action: MenuAction::ColorScheme("Solarized Dark (Gogh)"),
-                    enabled: true,
                 },
             ],
         }
@@ -249,7 +234,6 @@ impl ContextMenu {
         let panel_border: LinearRgba = colors.border.to_linear();
         let button_bg: LinearRgba = colors.button_background.to_linear();
         let text_color: LinearRgba = colors.foreground.to_linear();
-        let disabled_text: LinearRgba = colors.disabled_foreground.to_linear();
         let selected_bg: LinearRgba = colors.hover_background.to_linear();
         let selected_border: LinearRgba = colors.focus_border.to_linear();
         let selected = *self.selected.borrow();
@@ -258,7 +242,7 @@ impl ContextMenu {
         let menu_width = if in_themes { 235. } else { 118. };
 
         let mut buttons = Vec::with_capacity(2);
-        for (idx, item) in items.iter().take(if in_themes { 0 } else { 2 }).enumerate() {
+        for idx in 0..if in_themes { 0 } else { 2 } {
             let icon = if idx == 0 {
                 ADD_RIGHT_ICON
             } else {
@@ -289,20 +273,12 @@ impl ContextMenu {
                         panel_border
                     }),
                     bg,
-                    text: if item.enabled {
-                        text_color.into()
-                    } else {
-                        disabled_text.into()
-                    },
+                    text: text_color.into(),
                 })
                 .hover_colors(Some(ElementColors {
                     border: BorderColor::new(selected_border),
                     bg: selected_bg.into(),
-                    text: if item.enabled {
-                        text_color.into()
-                    } else {
-                        disabled_text.into()
-                    },
+                    text: text_color.into(),
                 }))
                 .padding(BoxDimension {
                     left: Dimension::Pixels(15.),
@@ -355,13 +331,9 @@ impl ContextMenu {
                     .colors(ElementColors {
                         border: BorderColor::default(),
                         bg,
-                        text: if item.enabled {
-                            text_color.into()
-                        } else {
-                            disabled_text.into()
-                        },
+                        text: text_color.into(),
                     })
-                    .hover_colors(item.enabled.then_some(ElementColors {
+                    .hover_colors(Some(ElementColors {
                         border: BorderColor::default(),
                         bg: selected_bg.into(),
                         text: text_color.into(),
@@ -448,11 +420,10 @@ impl ContextMenu {
     }
 
     fn activate(&self, idx: usize, term_window: &mut TermWindow) -> anyhow::Result<()> {
-        let action = match self.items().get(idx) {
-            Some(item) if item.enabled => item.action.clone(),
-            None => return Ok(()),
-            Some(_) => return Ok(()),
+        let Some(item) = self.items().get(idx) else {
+            return Ok(());
         };
+        let action = item.action.clone();
         match action {
             MenuAction::Themes => self.show_themes(true, term_window),
             MenuAction::Back => self.show_themes(false, term_window),
@@ -493,26 +464,17 @@ impl ContextMenu {
     fn move_selection(&self, delta: isize, term_window: &mut TermWindow) {
         let mut selected = self.selected.borrow_mut();
         let last = self.items().len().saturating_sub(1);
-        loop {
-            let next = if delta < 0 {
-                selected.saturating_sub(delta.unsigned_abs())
-            } else {
-                selected.saturating_add(delta as usize).min(last)
-            };
-            if next == *selected {
-                break;
-            }
-            *selected = next;
-            if self.items()[*selected].enabled {
-                break;
-            }
-        }
+        *selected = if delta < 0 {
+            selected.saturating_sub(delta.unsigned_abs())
+        } else {
+            selected.saturating_add(delta as usize).min(last)
+        };
         self.element.borrow_mut().take();
         term_window.invalidate_modal();
     }
 
     pub fn select_item(&self, idx: usize, term_window: &mut TermWindow) {
-        if idx < self.items().len() && self.items()[idx].enabled && *self.selected.borrow() != idx {
+        if idx < self.items().len() && *self.selected.borrow() != idx {
             *self.selected.borrow_mut() = idx;
             self.element.borrow_mut().take();
             term_window.invalidate_modal();
