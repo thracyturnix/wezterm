@@ -13,6 +13,8 @@ use config::keyassignment::{
 use config::{DeferredKeyCode, Dimension, DimensionContext, KeyNoAction};
 use mux::pane::Pane;
 use std::cell::{Cell, Ref, RefCell};
+use std::io::Write;
+use std::path::Path;
 use std::sync::Arc;
 use wezterm_dynamic::Value;
 use wezterm_term::{KeyCode, KeyModifiers, MouseEvent};
@@ -30,6 +32,93 @@ enum MenuAction {
     Themes,
     Back,
     ColorScheme(&'static str),
+}
+
+fn color_scheme_file() -> std::path::PathBuf {
+    config::DATA_DIR.join("selected-color-scheme")
+}
+
+fn menu_color_scheme(name: &str) -> bool {
+    matches!(
+        name,
+        config::TERMINATOR_GRUVBOX_SOLARIZED
+            | "Gruvbox dark, soft (base16)"
+            | "Everforest Dark Soft (Gogh)"
+            | "Nord (Gogh)"
+            | "Solarized Dark (Gogh)"
+            | "Catppuccin Mocha"
+            | "Dracula"
+            | "Tokyo Night"
+            | "Gruvbox dark, hard (base16)"
+            | "OneHalfDark"
+            | "Afterglow"
+    )
+}
+
+pub(super) fn saved_color_scheme_overrides() -> Value {
+    saved_color_scheme_overrides_from(&color_scheme_file())
+}
+
+fn saved_color_scheme_overrides_from(path: &Path) -> Value {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => {
+            let name = contents.trim_end_matches(['\r', '\n']);
+            if menu_color_scheme(name) {
+                let mut overrides = std::collections::BTreeMap::new();
+                overrides.insert(
+                    Value::String("color_scheme".to_string()),
+                    Value::String(name.to_string()),
+                );
+                Value::Object(overrides.into())
+            } else {
+                log::warn!("Ignoring unknown saved color scheme in {}", path.display());
+                Value::default()
+            }
+        }
+        Err(err) => {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("Unable to read {}: {:#}", path.display(), err);
+            }
+            Value::default()
+        }
+    }
+}
+
+fn save_color_scheme(name: &str) -> anyhow::Result<()> {
+    save_color_scheme_to(&color_scheme_file(), name)
+}
+
+fn save_color_scheme_to(path: &Path, name: &str) -> anyhow::Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("no theme data directory"))?;
+    config::create_user_owned_dirs(dir)?;
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(name.as_bytes())?;
+    file.flush()?;
+    file.persist(&path)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    #[test]
+    fn selected_theme_survives_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("selected-color-scheme");
+        let theme = "Nord (Gogh)";
+        save_color_scheme_to(&path, theme).unwrap();
+        let overrides = saved_color_scheme_overrides_from(&path);
+        let Value::Object(overrides) = overrides else {
+            panic!("saved theme did not load");
+        };
+        assert_eq!(
+            overrides.get(&Value::String("color_scheme".to_string())),
+            Some(&Value::String(theme.to_string()))
+        );
+    }
 }
 
 const ADD_RIGHT_ICON: &[Poly] = &[
@@ -197,6 +286,30 @@ impl ContextMenu {
                 MenuItem {
                     label: "Solarized Dark",
                     action: MenuAction::ColorScheme("Solarized Dark (Gogh)"),
+                },
+                MenuItem {
+                    label: "Catppuccin Mocha",
+                    action: MenuAction::ColorScheme("Catppuccin Mocha"),
+                },
+                MenuItem {
+                    label: "Dracula",
+                    action: MenuAction::ColorScheme("Dracula"),
+                },
+                MenuItem {
+                    label: "Tokyo Night",
+                    action: MenuAction::ColorScheme("Tokyo Night"),
+                },
+                MenuItem {
+                    label: "Gruvbox Dark Hard",
+                    action: MenuAction::ColorScheme("Gruvbox dark, hard (base16)"),
+                },
+                MenuItem {
+                    label: "OneHalf Dark",
+                    action: MenuAction::ColorScheme("OneHalfDark"),
+                },
+                MenuItem {
+                    label: "Afterglow",
+                    action: MenuAction::ColorScheme("Afterglow"),
                 },
             ],
         }
@@ -428,6 +541,9 @@ impl ContextMenu {
             MenuAction::Themes => self.show_themes(true, term_window),
             MenuAction::Back => self.show_themes(false, term_window),
             MenuAction::ColorScheme(name) => {
+                if let Err(err) = save_color_scheme(name) {
+                    log::error!("Unable to save color scheme {}: {:#}", name, err);
+                }
                 let mut overrides = match &term_window.config_overrides {
                     Value::Object(object) => object.clone(),
                     _ => Default::default(),

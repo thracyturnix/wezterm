@@ -589,7 +589,11 @@ impl TermWindow {
 
 impl TermWindow {
     pub async fn new_window(mux_window_id: MuxWindowId) -> anyhow::Result<()> {
-        let config = configuration();
+        let config_overrides = contextmenu::saved_color_scheme_overrides();
+        let config = config::overridden_config(&config_overrides).unwrap_or_else(|err| {
+            log::error!("Unable to apply saved color scheme: {:#}", err);
+            configuration()
+        });
         let dpi = config.dpi.unwrap_or_else(|| ::window::default_dpi()) as usize;
         let fontconfig = Rc::new(FontConfiguration::new(Some(config.clone()), dpi)?);
 
@@ -697,7 +701,7 @@ impl TermWindow {
             window: None,
             window_background,
             config: config.clone(),
-            config_overrides: wezterm_dynamic::Value::default(),
+            config_overrides,
             palette: None,
             focused: None,
             mux_window_id,
