@@ -1,3 +1,5 @@
+Every build must produce a Debian package that can be installed with `apt`; a successful binary-only build is not complete.
+
 # Repository notes
 
 - On LMDE, `lsb_release` identifies the host as Linuxmint, while WezTerm packages use the Debian base version. `ci/deploy.sh` must map LMDE to Debian packaging and fail with a nonzero exit status if a platform is unsupported. Never treat a successful exit with no package as a successful build.

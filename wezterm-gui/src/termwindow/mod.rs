@@ -1995,6 +1995,13 @@ impl TermWindow {
             None => false,
         };
 
+        let version = config::wezterm_version();
+        let right_status = if self.right_status.is_empty() {
+            version.to_string()
+        } else {
+            format!("{}  {}", self.right_status, version)
+        };
+
         let new_tab_bar = TabBarState::new(
             self.dimensions.pixel_width / self.render_metrics.cell_size.width as usize,
             if hovering_in_tab_bar {
@@ -2007,7 +2014,7 @@ impl TermWindow {
             self.config.resolved_palette.tab_bar.as_ref(),
             &self.config,
             &self.left_status,
-            &self.right_status,
+            &right_status,
         );
         if new_tab_bar != self.tab_bar {
             self.tab_bar = new_tab_bar;

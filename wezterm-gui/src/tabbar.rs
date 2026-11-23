@@ -1,10 +1,9 @@
 use crate::termwindow::{PaneInformation, TabInformation, UIItem, UIItemType};
 use config::{ConfigHandle, TabBarColors};
 use finl_unicode::grapheme_clusters::Graphemes;
-use mlua::FromLua;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
-use termwiz::cell::{unicode_column_width, Cell, CellAttributes};
+use termwiz::cell::{Cell, CellAttributes};
 use termwiz::color::{AnsiColor, ColorSpec};
 use termwiz::escape::csi::Sgr;
 use termwiz::escape::parser::Parser;
@@ -45,86 +44,11 @@ pub struct TabEntry {
 #[derive(Clone, Debug)]
 struct TitleText {
     items: Vec<FormatItem>,
-    len: usize,
     /// True when the built-in title path rendered an indeterminate spinner
     /// frame. A custom format-tab-title callback always leaves this false.
     has_indeterminate: bool,
 }
 
-fn call_format_tab_title(
-    tab: &TabInformation,
-    tab_info: &[TabInformation],
-    pane_info: &[PaneInformation],
-    config: &ConfigHandle,
-    hover: bool,
-    tab_max_width: usize,
-) -> Option<TitleText> {
-    match config::run_immediate_with_lua_config(|lua| {
-        if let Some(lua) = lua {
-            let tabs = lua.create_sequence_from(tab_info.iter().cloned())?;
-            let panes = lua.create_sequence_from(pane_info.iter().cloned())?;
-
-            let v = config::lua::emit_sync_callback(
-                &*lua,
-                (
-                    "format-tab-title".to_string(),
-                    (
-                        tab.clone(),
-                        tabs,
-                        panes,
-                        (**config).clone(),
-                        hover,
-                        tab_max_width,
-                    ),
-                ),
-            )?;
-            match &v {
-                mlua::Value::Nil => Ok(None),
-                mlua::Value::Table(_) => {
-                    let items = <Vec<FormatItem>>::from_lua(v, &*lua)?;
-
-                    let esc = format_as_escapes(items.clone())?;
-                    let line = parse_status_text(&esc, CellAttributes::default());
-
-                    Ok(Some(TitleText {
-                        items,
-                        len: line.len(),
-                        has_indeterminate: false,
-                    }))
-                }
-                _ => {
-                    let s = String::from_lua(v, &*lua)?;
-                    let line = parse_status_text(&s, CellAttributes::default());
-                    Ok(Some(TitleText {
-                        len: line.len(),
-                        items: vec![FormatItem::Text(s)],
-                        has_indeterminate: false,
-                    }))
-                }
-            }
-        } else {
-            Ok(None)
-        }
-    }) {
-        Ok(s) => s,
-        Err(err) => {
-            log::warn!("format-tab-title: {}", err);
-            None
-        }
-    }
-}
-
-/// pct is a percentage in the range 0-100.
-/// We want to map it to one of the nerdfonts:
-///
-/// * `md-checkbox_blank_circle_outline` (0xf0130) for an empty circle
-/// * `md_circle_slice_1..=7` (0xf0a9e ..= 0xf0aa4) for a partly filled
-///   circle
-/// * `md_circle_slice_8` (0xf0aa5) for a filled circle
-///
-/// We use an empty circle for values close to 0%, a filled circle for values
-/// close to 100%, and a partly filled circle for the rest (roughly evenly
-/// distributed).
 fn pct_to_glyph(pct: u8) -> char {
     match pct {
         0..=5 => '\u{f0130}',    // empty circle
@@ -200,100 +124,91 @@ fn spinner_phase(tab_id: usize) -> u64 {
     z ^ (z >> 31)
 }
 
-fn compute_tab_title(
-    tab: &TabInformation,
-    tab_info: &[TabInformation],
-    pane_info: &[PaneInformation],
-    config: &ConfigHandle,
-    hover: bool,
-    tab_max_width: usize,
-) -> TitleText {
-    let title = call_format_tab_title(tab, tab_info, pane_info, config, hover, tab_max_width);
+/// Returns the name of the folder that the given pane is currently in,
+/// eg: `wezterm-mod` for a pane whose cwd is `/home/user/wezterm-mod`.
+fn pane_folder_name(pane_id: mux::pane::PaneId) -> Option<String> {
+    let mux = mux::Mux::try_get()?;
+    let pane = mux.get_pane(pane_id)?;
+    let mut url = pane.get_current_working_dir(mux::pane::CachePolicy::AllowStale)?;
+    // OSC 7 urls carry the hostname, which prevents to_file_path from
+    // working on unix; we only care about the path portion.
+    let _ = url.set_host(None);
+    let path = url.to_file_path().ok()?;
+    match path.file_name() {
+        Some(name) => Some(name.to_string_lossy().into_owned()),
+        // The root directory has no file name
+        None => Some(path.to_string_lossy().into_owned()),
+    }
+}
 
-    match title {
-        Some(title) => title,
+/// Computes the text for the single full-width bar that replaces the
+/// per-tab titles: `folder │ title`, where title is the title set by
+/// the program running in the focused pane (eg: an agent's task name).
+fn compute_pane_bar_title(tab: &TabInformation) -> TitleText {
+    let mut items = vec![];
+    let mut has_indeterminate = false;
+
+    let pane = match &tab.active_pane {
+        Some(pane) => pane,
         None => {
-            let mut items = vec![];
-            let mut len = 0;
-            let mut has_indeterminate = false;
-
-            if let Some(pane) = &tab.active_pane {
-                let mut title = if tab.tab_title.is_empty() {
-                    pane.title.clone()
-                } else {
-                    tab.tab_title.clone()
-                };
-
-                let classic_spacing = if config.use_fancy_tab_bar { "" } else { " " };
-                if config.show_tab_index_in_tab_bar {
-                    let index = format!(
-                        "{classic_spacing}{}: ",
-                        tab.tab_index
-                            + if config.tab_and_split_indices_are_zero_based {
-                                0
-                            } else {
-                                1
-                            }
-                    );
-                    len += unicode_column_width(&index, None);
-                    items.push(FormatItem::Text(index));
-
-                    title = format!("{}{classic_spacing}", title);
-                }
-
-                match pane.progress {
-                    Progress::None => {}
-                    Progress::Percentage(pct) | Progress::Error(pct) => {
-                        let graphic = format!("{} ", pct_to_glyph(pct));
-                        len += unicode_column_width(&graphic, None);
-                        let color = if matches!(pane.progress, Progress::Percentage(_)) {
-                            FormatItem::Foreground(FormatColor::AnsiColor(AnsiColor::Green))
-                        } else {
-                            FormatItem::Foreground(FormatColor::AnsiColor(AnsiColor::Red))
-                        };
-                        items.push(color);
-                        items.push(FormatItem::Text(graphic));
-                        items.push(FormatItem::Foreground(FormatColor::Default));
-                    }
-                    Progress::Indeterminate => {
-                        has_indeterminate = true;
-                        let graphic = format!(
-                            "{} ",
-                            indeterminate_spinner_glyph(spinner_phase(tab.tab_id))
-                        );
-                        len += unicode_column_width(&graphic, None);
-                        items.push(FormatItem::Foreground(FormatColor::AnsiColor(
-                            AnsiColor::Green,
-                        )));
-                        items.push(FormatItem::Text(graphic));
-                        items.push(FormatItem::Foreground(FormatColor::Default));
-                    }
-                }
-
-                // We have a preferred soft minimum on tab width to make it
-                // easier to click on tab titles, but we'll still go below
-                // this if there are too many tabs to fit the window at
-                // this width.
-                if !config.use_fancy_tab_bar {
-                    while len + unicode_column_width(&title, None) < 5 {
-                        title.push(' ');
-                    }
-                }
-
-                len += unicode_column_width(&title, None);
-                items.push(FormatItem::Text(title));
-            } else {
-                let title = " no pane ".to_string();
-                len += unicode_column_width(&title, None);
-                items.push(FormatItem::Text(title));
-            };
-
-            TitleText {
-                len,
+            let title = "no pane".to_string();
+            items.push(FormatItem::Text(title));
+            return TitleText {
                 items,
                 has_indeterminate,
-            }
+            };
         }
+    };
+
+    if let Some(folder) = pane_folder_name(pane.pane_id) {
+        items.push(FormatItem::Text(folder));
+
+        let separator = "  │  ".to_string();
+        items.push(FormatItem::Foreground(FormatColor::AnsiColor(
+            AnsiColor::Grey,
+        )));
+        items.push(FormatItem::Text(separator));
+        items.push(FormatItem::Foreground(FormatColor::Default));
+    }
+
+    match pane.progress {
+        Progress::None => {}
+        Progress::Percentage(pct) | Progress::Error(pct) => {
+            let graphic = format!("{} ", pct_to_glyph(pct));
+            let color = if matches!(pane.progress, Progress::Percentage(_)) {
+                AnsiColor::Green
+            } else {
+                AnsiColor::Red
+            };
+            items.push(FormatItem::Foreground(FormatColor::AnsiColor(color)));
+            items.push(FormatItem::Text(graphic));
+            items.push(FormatItem::Foreground(FormatColor::Default));
+        }
+        Progress::Indeterminate => {
+            has_indeterminate = true;
+            let graphic = format!(
+                "{} ",
+                indeterminate_spinner_glyph(spinner_phase(tab.tab_id))
+            );
+            items.push(FormatItem::Foreground(FormatColor::AnsiColor(
+                AnsiColor::Green,
+            )));
+            items.push(FormatItem::Text(graphic));
+            items.push(FormatItem::Foreground(FormatColor::Default));
+        }
+    }
+
+    // An explicitly set tab title wins over the title set by the program
+    let title = if tab.tab_title.is_empty() {
+        pane.title.clone()
+    } else {
+        tab.tab_title.clone()
+    };
+    items.push(FormatItem::Text(title));
+
+    TitleText {
+        items,
+        has_indeterminate,
     }
 }
 
@@ -424,7 +339,7 @@ impl TabBarState {
         title_width: usize,
         mouse_x: Option<usize>,
         tab_info: &[TabInformation],
-        pane_info: &[PaneInformation],
+        _pane_info: &[PaneInformation],
         colors: Option<&TabBarColors>,
         config: &ConfigHandle,
         left_status: &str,
@@ -433,73 +348,14 @@ impl TabBarState {
         let colors = colors.cloned().unwrap_or_else(TabBarColors::default);
 
         let active_cell_attrs = colors.active_tab().as_cell_attributes();
-        let inactive_hover_attrs = colors.inactive_tab_hover().as_cell_attributes();
-        let inactive_cell_attrs = colors.inactive_tab().as_cell_attributes();
-        let new_tab_hover_attrs = colors.new_tab_hover().as_cell_attributes();
-        let new_tab_attrs = colors.new_tab().as_cell_attributes();
-
-        let new_tab = parse_status_text(
-            &config.tab_bar_style.new_tab,
-            if config.use_fancy_tab_bar {
-                CellAttributes::default()
-            } else {
-                new_tab_attrs.clone()
-            },
-        );
-        let new_tab_hover = parse_status_text(
-            &config.tab_bar_style.new_tab_hover,
-            if config.use_fancy_tab_bar {
-                CellAttributes::default()
-            } else {
-                new_tab_hover_attrs.clone()
-            },
-        );
-
         let use_integrated_title_buttons = config
             .window_decorations
             .contains(window::WindowDecorations::INTEGRATED_BUTTONS);
 
         // We ultimately want to produce a line looking like this:
-        // ` | tab1-title x | tab2-title x |  +      . - X `
-        // Where the `+` sign will spawn a new tab (or show a context
-        // menu with tab creation options) and the other three chars
-        // are symbols representing minimize, maximize and close.
-
-        let mut active_tab_no = 0;
-
-        let tab_titles: Vec<TitleText> = if config.show_tabs_in_tab_bar {
-            tab_info
-                .iter()
-                .map(|tab| {
-                    if tab.is_active {
-                        active_tab_no = tab.tab_index;
-                    }
-                    compute_tab_title(
-                        tab,
-                        tab_info,
-                        pane_info,
-                        config,
-                        false,
-                        config.tab_max_width,
-                    )
-                })
-                .collect()
-        } else {
-            vec![]
-        };
-        let titles_len: usize = tab_titles.iter().map(|s| s.len).sum();
-        let number_of_tabs = tab_titles.len();
-
-        let available_cells =
-            title_width.saturating_sub(number_of_tabs.saturating_sub(1) + new_tab.len());
-        let tab_width_max = if config.use_fancy_tab_bar || available_cells >= titles_len {
-            // We can render each title with its full width
-            usize::max_value()
-        } else {
-            // We need to clamp the length to balance them out
-            available_cells / number_of_tabs
-        }
-        .min(config.tab_max_width);
+        // ` folder │ title of the focused pane          status . - X `
+        // Where the last three chars are symbols representing
+        // minimize, maximize and close.
 
         let mut line = Line::with_width(0, SEQ_ZERO);
 
@@ -541,83 +397,6 @@ impl TabBarState {
             });
             x += left_status_line.len();
             line.append_line(left_status_line, SEQ_ZERO);
-        }
-
-        for (tab_idx, tab_title) in tab_titles.iter().enumerate() {
-            let tab_title_len = tab_title.len.min(tab_width_max);
-            let active = tab_idx == active_tab_no;
-            let hover = !active && is_tab_hover(mouse_x, x, tab_title_len);
-
-            // Recompute the title so that it factors in both the hover state
-            // and the adjusted maximum tab width based on available space.
-            let tab_title = compute_tab_title(
-                &tab_info[tab_idx],
-                tab_info,
-                pane_info,
-                config,
-                hover,
-                tab_title_len,
-            );
-
-            let cell_attrs = if active {
-                &active_cell_attrs
-            } else if hover {
-                &inactive_hover_attrs
-            } else {
-                &inactive_cell_attrs
-            };
-
-            let tab_start_idx = x;
-
-            has_indeterminate_progress |= tab_title.has_indeterminate;
-
-            let esc = format_as_escapes(tab_title.items.clone()).expect("already parsed ok above");
-            let mut tab_line = parse_status_text(
-                &esc,
-                if config.use_fancy_tab_bar {
-                    CellAttributes::default()
-                } else {
-                    cell_attrs.clone()
-                },
-            );
-
-            let title = tab_line.clone();
-            if tab_line.len() > tab_width_max {
-                tab_line.resize(tab_width_max, SEQ_ZERO);
-            }
-
-            let width = tab_line.len();
-
-            items.push(TabEntry {
-                item: TabBarItem::Tab { tab_idx, active },
-                title,
-                x: tab_start_idx,
-                width,
-            });
-
-            line.append_line(tab_line, SEQ_ZERO);
-            x += width;
-        }
-
-        // New tab button
-        if config.show_new_tab_button_in_tab_bar {
-            let hover = is_tab_hover(mouse_x, x, new_tab_hover.len());
-
-            let new_tab_button = if hover { &new_tab_hover } else { &new_tab };
-
-            let button_start = x;
-            let width = new_tab_button.len();
-
-            line.append_line(new_tab_button.clone(), SEQ_ZERO);
-
-            items.push(TabEntry {
-                item: TabBarItem::NewTabButton,
-                title: new_tab_button.clone(),
-                x: button_start,
-                width,
-            });
-
-            x += width;
         }
 
         // Reserve place for integrated title buttons
@@ -668,6 +447,61 @@ impl TabBarState {
         } else {
             title_width
         };
+
+        // Rather than one tab per tab, show a single bar describing the
+        // focused pane of the active tab that uses all of the available width.
+        let right_status_line_len =
+            parse_status_text(right_status, black_cell.attrs().clone()).len();
+        if config.show_tabs_in_tab_bar {
+            if let Some(tab) = tab_info.iter().find(|tab| tab.is_active) {
+                let bar_title = compute_pane_bar_title(tab);
+                has_indeterminate_progress |= bar_title.has_indeterminate;
+
+                let esc =
+                    format_as_escapes(bar_title.items.clone()).expect("already parsed ok above");
+                let mut bar_line = parse_status_text(
+                    &esc,
+                    if config.use_fancy_tab_bar {
+                        CellAttributes::default()
+                    } else {
+                        active_cell_attrs.clone()
+                    },
+                );
+                let title = bar_line.clone();
+
+                // Leave room for the right status and a little padding
+                let bar_width = title_width
+                    .saturating_sub(x)
+                    .saturating_sub(right_status_line_len + 2);
+                if bar_line.len() > bar_width {
+                    bar_line.resize(bar_width, SEQ_ZERO);
+                }
+                if !config.use_fancy_tab_bar {
+                    // Fill the bar out to the full width
+                    while bar_line.len() < bar_width {
+                        bar_line.insert_cell(
+                            bar_line.len(),
+                            Cell::blank_with_attrs(active_cell_attrs.clone()),
+                            bar_width,
+                            SEQ_ZERO,
+                        );
+                    }
+                }
+
+                let width = bar_line.len();
+                items.push(TabEntry {
+                    item: TabBarItem::Tab {
+                        tab_idx: tab.tab_index,
+                        active: true,
+                    },
+                    title,
+                    x,
+                    width,
+                });
+                line.append_line(bar_line, SEQ_ZERO);
+                x += width;
+            }
+        }
 
         let status_space_available = title_width.saturating_sub(x);
 
