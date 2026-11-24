@@ -378,6 +378,13 @@ EOF
             ;;
         esac
 
+        expected_build=$(printf '%03d' $(( $(git rev-list --count HEAD) % 1000 )))
+        actual_build=$(pkg/debian/usr/bin/wezterm --version | awk '{print $2}')
+        if [[ "$actual_build" != "$expected_build" ]] ; then
+          echo "Stale build number: binary reports '$actual_build' but HEAD is build $expected_build. Rebuild before packaging." >&2
+          exit 1
+        fi
+
         fakeroot dpkg-deb --build pkg/debian $debname.deb
 
         if [[ "$BUILD_REASON" != '' ]] ; then
