@@ -129,16 +129,24 @@ fn spinner_phase(tab_id: usize) -> u64 {
 fn pane_folder_name(pane_id: mux::pane::PaneId) -> Option<String> {
     let mux = mux::Mux::try_get()?;
     let pane = mux.get_pane(pane_id)?;
-    let mut url = pane.get_current_working_dir(mux::pane::CachePolicy::AllowStale)?;
-    // OSC 7 urls carry the hostname, which prevents to_file_path from
-    // working on unix; we only care about the path portion.
-    let _ = url.set_host(None);
-    let path = url.to_file_path().ok()?;
+    let url = pane.get_current_working_dir(mux::pane::CachePolicy::AllowStale)?;
+    let path = cwd_url_to_path(&url)?;
     match path.file_name() {
         Some(name) => Some(name.to_string_lossy().into_owned()),
         // The root directory has no file name
         None => Some(path.to_string_lossy().into_owned()),
     }
+}
+
+/// Converts a cwd url into a local path.
+/// OSC 7 urls usually carry the hostname (eg: `file://myhost/home/user`),
+/// and `Url::to_file_path` rejects any non-local host on unix, so rebuild
+/// a host-less `file://` url from the (still percent-encoded) path portion.
+fn cwd_url_to_path(url: &url::Url) -> Option<std::path::PathBuf> {
+    url::Url::parse(&format!("file://{}", url.path()))
+        .ok()?
+        .to_file_path()
+        .ok()
 }
 
 /// Computes the text for the single full-width bar that replaces the
@@ -657,4 +665,35 @@ pub fn parse_status_text(text: &str, default_cell: CellAttributes) -> Line {
     });
     flush_print(&mut print_buffer, &mut cells, &pen);
     Line::from_cells(cells, SEQ_ZERO)
+}
+
+#[cfg(test)]
+mod test {
+    use super::cwd_url_to_path;
+    use std::path::PathBuf;
+
+    fn path(s: &str) -> Option<PathBuf> {
+        cwd_url_to_path(&url::Url::parse(s).unwrap())
+    }
+
+    #[test]
+    fn cwd_url_with_hostname() {
+        assert_eq!(
+            path("file://myhost/home/old/wezterm-mod"),
+            Some(PathBuf::from("/home/old/wezterm-mod"))
+        );
+        assert_eq!(
+            path("file://myhost/home/old/my%20dir"),
+            Some(PathBuf::from("/home/old/my dir"))
+        );
+    }
+
+    #[test]
+    fn cwd_url_without_hostname() {
+        assert_eq!(
+            path("file:///home/old/wezterm-mod"),
+            Some(PathBuf::from("/home/old/wezterm-mod"))
+        );
+        assert_eq!(path("file:///"), Some(PathBuf::from("/")));
+    }
 }
