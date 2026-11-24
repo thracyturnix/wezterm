@@ -18,11 +18,40 @@ use wezterm_toast_notification::*;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Release {
+    #[serde(default)]
     pub url: String,
+    #[serde(default)]
     pub body: String,
+    #[serde(default)]
     pub html_url: String,
+    /// The full commit count of the published build, eg: "8718".
     pub tag_name: String,
+    #[serde(default)]
     pub assets: Vec<Asset>,
+}
+
+/// Where this fork publishes the newest build it has put in its APT
+/// repository. The file is written by .github/workflows/publish-apt.yml.
+const LATEST_RELEASE_URL: &str = "https://thracyturnix.github.io/wezterm/latest.json";
+const CHANGES_URL: &str = "https://github.com/thracyturnix/wezterm/commits/main";
+
+/// True when `latest` is a newer build of this fork than the running one.
+/// Release info cached from the upstream project uses date tags, which
+/// don't parse as a build count and so never count as newer.
+fn is_newer(latest: &Release) -> bool {
+    latest
+        .tag_name
+        .parse::<u64>()
+        .map(|count| count > wezterm_version::wezterm_build_count())
+        .unwrap_or(false)
+}
+
+fn changes_url(latest: &Release) -> String {
+    if latest.html_url.starts_with("https://github.com/thracyturnix/wezterm/") {
+        latest.html_url.clone()
+    } else {
+        CHANGES_URL.to_string()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -41,10 +70,10 @@ fn get_github_release_info(uri: &str) -> anyhow::Result<Release> {
         .version(HttpVersion::Http10)
         .header(
             "User-Agent",
-            &format!("wezterm/wezterm-{}", wezterm_version()),
+            &format!("thracyturnix-wezterm/{}", wezterm_version()),
         )
         .send(&mut latest)
-        .map_err(|e| anyhow!("failed to query github releases: {}", e))?;
+        .map_err(|e| anyhow!("failed to query latest release: {}", e))?;
 
     /*
     println!("Status: {} {}", _res.status_code(), _res.reason());
@@ -56,12 +85,13 @@ fn get_github_release_info(uri: &str) -> anyhow::Result<Release> {
 }
 
 pub fn get_latest_release_info() -> anyhow::Result<Release> {
-    get_github_release_info("https://api.github.com/repos/wezterm/wezterm/releases/latest")
+    get_github_release_info(LATEST_RELEASE_URL)
 }
 
 #[allow(unused)]
 pub fn get_nightly_release_info() -> anyhow::Result<Release> {
-    get_github_release_info("https://api.github.com/repos/wezterm/wezterm/releases/tags/nightly")
+    // This fork publishes a single rolling build.
+    get_latest_release_info()
 }
 
 lazy_static::lazy_static! {
@@ -80,9 +110,8 @@ pub fn load_last_release_info_and_set_banner() {
             Err(_) => return,
         };
 
-        let current = wezterm_version();
         let force_ui = std::env::var_os("WEZTERM_ALWAYS_SHOW_UPDATE_UI").is_some();
-        if latest.tag_name.as_str() <= current && !force_ui {
+        if !is_newer(&latest) && !force_ui {
             return;
         }
 
@@ -92,7 +121,7 @@ pub fn load_last_release_info_and_set_banner() {
 
 fn set_banner_from_release_info(latest: &Release) {
     let mux = crate::Mux::get();
-    let url = format!("https://wezterm.org/changelog.html#{}", latest.tag_name);
+    let url = changes_url(latest);
 
     let icon = ITermFileData {
         name: None,
@@ -132,8 +161,7 @@ fn set_banner_from_release_info(latest: &Release) {
 }
 
 fn schedule_set_banner_from_release_info(latest: &Release) {
-    let current = wezterm_version();
-    if latest.tag_name.as_str() <= current {
+    if !is_newer(latest) {
         return;
     }
     promise::spawn::spawn_into_main_thread({
@@ -183,15 +211,14 @@ fn update_checker() {
         if configuration().check_for_updates {
             if let Ok(latest) = get_latest_release_info() {
                 schedule_set_banner_from_release_info(&latest);
-                let current = wezterm_version();
-                if latest.tag_name.as_str() > current || force_ui {
+                if is_newer(&latest) || force_ui {
                     log::info!(
-                        "latest release {} is newer than current build {}",
+                        "latest build {} is newer than current build {}",
                         latest.tag_name,
-                        current
+                        wezterm_version::wezterm_build_count()
                     );
 
-                    let url = format!("https://wezterm.org/changelog.html#{}", latest.tag_name);
+                    let url = changes_url(&latest);
 
                     if force_ui || socks.is_empty() || socks[0] == my_sock {
                         persistent_toast_notification_with_click_to_open_url(
@@ -231,5 +258,29 @@ pub fn start_update_checker() {
             .name("update_checker".into())
             .spawn(update_checker)
             .expect("failed to spawn update checker thread");
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn release(tag: &str) -> Release {
+        serde_json::from_str(&format!(r#"{{"tag_name": "{}"}}"#, tag)).unwrap()
+    }
+
+    #[test]
+    fn newer_fork_build_is_detected() {
+        let current = wezterm_version::wezterm_build_count();
+        assert!(is_newer(&release(&(current + 1).to_string())));
+        assert!(!is_newer(&release(&current.to_string())));
+        assert!(!is_newer(&release(&(current - 1).to_string())));
+    }
+
+    #[test]
+    fn upstream_release_tags_are_ignored() {
+        assert!(!is_newer(&release("20240203-110809-5046fc22")));
+        assert!(!is_newer(&release("nightly")));
+        assert_eq!(changes_url(&release("1")), CHANGES_URL);
     }
 }

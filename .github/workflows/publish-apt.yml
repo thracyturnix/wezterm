@@ -44,6 +44,8 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
+          # Full history: the build number is the commit count.
+          fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Rust dependencies
@@ -63,11 +65,21 @@ jobs:
         run: cargo build --release -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes
       - name: Build Debian package
         run: bash ci/deploy.sh
+      - name: Write update-check metadata
+        run: |
+          count=$(git rev-list --count HEAD)
+          sha=$(git rev-parse HEAD)
+          test "$count" -gt 1
+          printf '{\n  "tag_name": "%s",\n  "html_url": "https://github.com/thracyturnix/wezterm/commits/%s",\n  "url": "https://thracyturnix.github.io/wezterm/latest.json",\n  "body": "",\n  "assets": []\n}\n' \
+            "$count" "$sha" > latest.json
+          cat latest.json
       - name: Upload Debian package
         uses: actions/upload-artifact@v7
         with:
           name: wezterm-apt-package
-          path: wezterm-*.deb
+          path: |
+            wezterm-*.deb
+            latest.json
 
   publish:
     if: github.repository == 'thracyturnix/wezterm'
@@ -113,6 +125,8 @@ jobs:
           gpg --batch --yes --local-user EB3EFDD8C82A6B21683E1260B40F0A13C3C75863 \
             --output dists/stable/InRelease --clearsign dists/stable/Release
           cp ../assets/apt/thracyturnix-wezterm-archive-keyring.gpg .
+          # Read by the built-in update check (wezterm-gui/src/update.rs).
+          cp ../packages/latest.json .
       - name: Record published version
         id: pkg
         run: |
@@ -150,6 +164,8 @@ jobs:
             echo "attempt $attempt: live=${live:-<none>} expected=$EXPECTED"
             if [ "$live" = "$EXPECTED" ]; then
               curl -fsSI "$base/dists/stable/InRelease" >/dev/null
+              curl -fsSL -H 'Cache-Control: no-cache' "$base/latest.json?t=$(date +%s)" \
+                | grep -q '"tag_name"'
               exit 0
             fi
             sleep 30
