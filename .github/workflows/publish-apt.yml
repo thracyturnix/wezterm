@@ -47,7 +47,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Rust dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         id: cache-cargo-vendor
         with:
           path: |
@@ -113,10 +113,46 @@ jobs:
           gpg --batch --yes --local-user EB3EFDD8C82A6B21683E1260B40F0A13C3C75863 \
             --output dists/stable/InRelease --clearsign dists/stable/Release
           cp ../assets/apt/thracyturnix-wezterm-archive-keyring.gpg .
+      - name: Record published version
+        id: pkg
+        run: |
+          version=$(dpkg-deb -f packages/*.deb Version)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Upload APT repository
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: repository
       - name: Deploy APT repository
+        id: deploy_first
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - name: Wait before retrying deploy
+        if: steps.deploy_first.outcome == 'failure'
+        run: sleep 60
+      - name: Retry deploy APT repository
+        id: deploy_retry
+        if: steps.deploy_first.outcome == 'failure'
+        uses: actions/deploy-pages@v5
+      - name: Expose deployment URL
         id: deployment
-        uses: actions/deploy-pages@v4
+        run: echo "page_url=${{ steps.deploy_first.outputs.page_url || steps.deploy_retry.outputs.page_url }}" >> "$GITHUB_OUTPUT"
+      # A green run must mean apt clients can actually see the new package.
+      - name: Verify live APT index serves the new version
+        env:
+          EXPECTED: ${{ steps.pkg.outputs.version }}
+        run: |
+          base=https://thracyturnix.github.io/wezterm
+          for attempt in $(seq 1 20); do
+            live=$(curl -fsSL -H 'Cache-Control: no-cache' \
+              "$base/dists/stable/main/binary-amd64/Packages?t=$(date +%s)" \
+              | sed -n 's/^Version: //p' | head -n1 || true)
+            echo "attempt $attempt: live=${live:-<none>} expected=$EXPECTED"
+            if [ "$live" = "$EXPECTED" ]; then
+              curl -fsSI "$base/dists/stable/InRelease" >/dev/null
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::APT repository still serves '${live:-nothing}', expected '$EXPECTED'"
+          exit 1
